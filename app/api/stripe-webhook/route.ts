@@ -67,19 +67,38 @@ export async function POST(req: Request) {
         return NextResponse.json({ received: true });
       }
 
-      // Process each item and update database
+      // Decrement quantity for each purchased item. When quantity hits zero we
+      // also flip is_available so the catalog stops listing it.
       for (const item of lineItems.data) {
         const metadata = getProductMetadata(item);
         const itemId = metadata?.id;
         const table = metadata?.table || (metadata?.type === 'card' ? 'CardItem' : metadata?.type === 'sealed' ? 'SealedProduct' : null);
+        const purchased = Number(item.quantity ?? 1) || 1;
 
         if (!itemId || !table) {
           continue;
         }
 
+        const { data: existing, error: fetchError } = await supabase
+          .from(table)
+          .select('quantity')
+          .eq('id', itemId)
+          .single();
+
+        if (fetchError) {
+          console.error(`Error reading ${table} item ${itemId}:`, fetchError);
+          continue;
+        }
+
+        const currentQty = Number(existing?.quantity ?? 0);
+        const nextQty = Math.max(0, currentQty - purchased);
+
         const { error } = await supabase
           .from(table)
-          .update({ is_available: false })
+          .update({
+            quantity: nextQty,
+            is_available: nextQty > 0,
+          })
           .eq('id', itemId);
 
         if (error) {

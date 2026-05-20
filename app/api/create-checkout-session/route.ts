@@ -24,6 +24,14 @@ interface TrustedCheckoutItem {
 const CARDS_TABLE = 'CardItem';
 const SEALED_TABLE = 'SealedProduct';
 const MINIMUM_PURCHASE = 5;
+const GENERIC_CHECKOUT_ERROR = 'Checkout is temporarily unavailable. Please try again or contact us.';
+
+class CheckoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CheckoutError';
+  }
+}
 
 function isRequestedCartItem(item: RequestedCartItem): item is RequestedCartItem {
   return (
@@ -42,19 +50,19 @@ function calculateShipping(items: TrustedCheckoutItem[]): number {
 
 function getServerSupabase() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-  if (!supabaseUrl || !serviceRoleKey) {
+  if (!supabaseUrl || !supabaseKey) {
     return null;
   }
 
-  return createClient(supabaseUrl, serviceRoleKey);
+  return createClient(supabaseUrl, supabaseKey);
 }
 
 async function getTrustedCheckoutItems(requestedItems: RequestedCartItem[]): Promise<TrustedCheckoutItem[]> {
   const supabase = getServerSupabase();
   if (!supabase) {
-    throw new Error('Server checkout database is not configured');
+    throw new Error('Checkout Supabase client is not configured');
   }
 
   const cardIds = requestedItems.filter((item) => item.type === 'card').map((item) => item.id);
@@ -62,15 +70,21 @@ async function getTrustedCheckoutItems(requestedItems: RequestedCartItem[]): Pro
 
   const [cardsRes, sealedRes] = await Promise.all([
     cardIds.length
-      ? supabase.from(CARDS_TABLE).select('id, card_id, card, price, weight, set, series, psa_grade, is_available').in('id', cardIds)
+      ? supabase
+          .from(CARDS_TABLE)
+          .select('id, card_id, card, price, weight, quantity, set, series, psa_grade, is_available')
+          .in('id', cardIds)
       : Promise.resolve({ data: [], error: null }),
     sealedIds.length
-      ? supabase.from(SEALED_TABLE).select('id, product_id, product_name, price, weight, sealed_series, is_available').in('id', sealedIds)
+      ? supabase
+          .from(SEALED_TABLE)
+          .select('id, product_id, product_name, price, weight, quantity, sealed_series, is_available')
+          .in('id', sealedIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
-  if (cardsRes.error) throw new Error('Failed to verify card inventory');
-  if (sealedRes.error) throw new Error('Failed to verify sealed inventory');
+  if (cardsRes.error) throw new Error(`Failed to verify card inventory: ${cardsRes.error.message}`);
+  if (sealedRes.error) throw new Error(`Failed to verify sealed inventory: ${sealedRes.error.message}`);
 
   const cardsById = new Map((cardsRes.data ?? []).map((row) => [Number(row.id), row]));
   const sealedById = new Map((sealedRes.data ?? []).map((row) => [Number(row.id), row]));
@@ -78,13 +92,18 @@ async function getTrustedCheckoutItems(requestedItems: RequestedCartItem[]): Pro
   return requestedItems.map((item) => {
     if (item.type === 'card') {
       const row = cardsById.get(item.id);
-      if (!row || row.is_available === false) {
-        throw new Error('One or more cards are no longer available');
+      if (!row) {
+        throw new CheckoutError('One or more cards are no longer available');
+      }
+
+      const available = row.is_available !== false && Number(row.quantity ?? 1) > 0;
+      if (!available) {
+        throw new CheckoutError('One or more cards are no longer available');
       }
 
       const price = Number(row.price);
       if (!Number.isFinite(price) || price <= 0 || !row.card) {
-        throw new Error('One or more cards cannot be checked out');
+        throw new CheckoutError('One or more cards cannot be checked out');
       }
 
       return {
@@ -101,13 +120,18 @@ async function getTrustedCheckoutItems(requestedItems: RequestedCartItem[]): Pro
     }
 
     const row = sealedById.get(item.id);
-    if (!row || row.is_available === false) {
-      throw new Error('One or more sealed products are no longer available');
+    if (!row) {
+      throw new CheckoutError('One or more sealed products are no longer available');
+    }
+
+    const available = row.is_available !== false && Number(row.quantity ?? 1) > 0;
+    if (!available) {
+      throw new CheckoutError('One or more sealed products are no longer available');
     }
 
     const price = Number(row.price);
     if (!Number.isFinite(price) || price <= 0 || !row.product_name) {
-      throw new Error('One or more sealed products cannot be checked out');
+      throw new CheckoutError('One or more sealed products cannot be checked out');
     }
 
     return {
@@ -201,8 +225,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ sessionId: session.id, url: session.url });
   } catch (err: unknown) {
     const error = err as Error;
+    console.error('Checkout session error:', error);
     return NextResponse.json(
-      { error: error.message },
+      { error: error instanceof CheckoutError ? error.message : GENERIC_CHECKOUT_ERROR },
       { status: 500 }
     );
   }
