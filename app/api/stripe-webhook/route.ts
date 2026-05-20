@@ -1,15 +1,10 @@
 import { NextResponse } from 'next/server';
 import { stripe } from '@/lib/stripe';
 import { createClient } from '@supabase/supabase-js';
+import type Stripe from 'stripe';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
 
 async function buffer(readable: ReadableStream<Uint8Array>) {
   const reader = readable.getReader();
@@ -25,6 +20,12 @@ async function buffer(readable: ReadableStream<Uint8Array>) {
   return Buffer.from(result);
 }
 
+function getProductMetadata(lineItem: Stripe.LineItem): Stripe.Metadata | null {
+  const product = lineItem.price?.product;
+  if (!product || typeof product === 'string' || ('deleted' in product && product.deleted)) return null;
+  return product.metadata;
+}
+
 export async function POST(req: Request) {
   const sig = req.headers.get('stripe-signature');
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
 
   // Initialize Supabase client
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   
   if (!supabaseUrl || !supabaseKey) {
     console.error('Missing Supabase environment variables');
@@ -56,28 +57,33 @@ export async function POST(req: Request) {
     
     // Handle successful checkout
     if (event.type === 'checkout.session.completed') {
-      const session = event.data.object as { id: string; line_items?: { data: Array<{ price?: { metadata?: { id?: string } } }> } };
-      // Extract line items from the session
-      const lineItems = session.line_items?.data || [];
+      const session = event.data.object as Stripe.Checkout.Session;
+      const lineItems = await stripe.checkout.sessions.listLineItems(session.id, {
+        limit: 100,
+        expand: ['data.price.product'],
+      });
       
-      if (lineItems.length === 0) {
+      if (lineItems.data.length === 0) {
         return NextResponse.json({ received: true });
       }
 
       // Process each item and update database
-      for (const item of lineItems) {
-        const itemId = item.price?.metadata?.id;
-        
-        if (itemId) {
-          // Update the item's availability in the database
-          const { error } = await supabase
-            .from('items')
-            .update({ is_available: false })
-            .eq('id', itemId);
-          
-          if (error) {
-            console.error(`Error updating item ${itemId}:`, error);
-          }
+      for (const item of lineItems.data) {
+        const metadata = getProductMetadata(item);
+        const itemId = metadata?.id;
+        const table = metadata?.table || (metadata?.type === 'card' ? 'CardItem' : metadata?.type === 'sealed' ? 'SealedProduct' : null);
+
+        if (!itemId || !table) {
+          continue;
+        }
+
+        const { error } = await supabase
+          .from(table)
+          .update({ is_available: false })
+          .eq('id', itemId);
+
+        if (error) {
+          console.error(`Error updating ${table} item ${itemId}:`, error);
         }
       }
     }

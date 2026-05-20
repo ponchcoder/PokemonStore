@@ -22,7 +22,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Ponchos Puchamon",
+  title: "Ponchos Pokemon",
   description: "High quality pokemon cards and products",
   icons: {
     icon: "/pokeball.png",
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Ponchos Puchamon",
+    title: "Ponchos Pokemon",
   },
   formatDetection: {
     telephone: false,

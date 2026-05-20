@@ -1,20 +1,58 @@
-import { supabase } from './supabase';
-import { CardItem, SealedProduct } from '../app/Ponchos/client-components/ssr/items-data';
+import { getSupabase } from './supabase';
+import { CardItem, SealedProduct } from '../app/PokemonStore/client-components/ssr/items-data';
+
+const CARDS_TABLE = 'CardItem';
+const SEALED_TABLE = 'SealedProduct';
+
+const CARD_COLUMNS = [
+  'id',
+  'card_id',
+  'card',
+  'series',
+  'set',
+  'energy_type',
+  'rarity',
+  'other_rarities',
+  'psa_grade',
+  'price',
+  'imageUrl',
+  'additionalImages',
+  'uploadDate',
+  'description',
+  'is_available',
+  'weight',
+  'quantity',
+].join(',');
+
+const SEALED_COLUMNS = [
+  'id',
+  'product_id',
+  'product_name',
+  'product_type',
+  'sealed_series',
+  'sealed_set',
+  'uploadDate',
+  'price',
+  'imageUrl',
+  'additionalImages',
+  'description',
+  'packs',
+  'is_available',
+  'weight',
+  'quantity',
+].join(',');
 
 type ItemWithJsonFields = CardItem | SealedProduct;
 
 function parseJsonFields(item: ItemWithJsonFields) {
-  // Helper function to safely parse JSON or return the original value
   const safeParse = (value: string | string[] | (string | null)[] | null): (string | null)[] => {
     if (!value) return [];
     if (Array.isArray(value)) return value;
     if (typeof value !== 'string') return [];
-    
     try {
       const parsed = JSON.parse(value);
       return Array.isArray(parsed) ? parsed : [parsed];
     } catch {
-      // If parsing fails, try to handle it as a comma-separated string
       if (value.includes(',')) {
         return value.split(',').map((v: string) => v.trim()).filter(v => v.length > 0);
       }
@@ -22,30 +60,21 @@ function parseJsonFields(item: ItemWithJsonFields) {
     }
   };
 
-  // Parse additionalImages field that might be JSON (handle NULL values)
   if (item.additionalImages !== null && item.additionalImages !== undefined) {
-    const parsed = safeParse(item.additionalImages);
-    item.additionalImages = parsed;
+    item.additionalImages = safeParse(item.additionalImages);
   } else {
-    // Set default empty array for NULL values
     item.additionalImages = [];
   }
 
-  // Parse other_rarities if it's a string (for backward compatibility)
   if (item.type === 'card') {
     const cardItem = item as CardItem;
-    
-    // Ensure other_rarities is always an array
     if (cardItem.other_rarities === null || cardItem.other_rarities === undefined) {
       cardItem.other_rarities = [];
     } else if (typeof cardItem.other_rarities === 'string') {
       cardItem.other_rarities = safeParse(cardItem.other_rarities) as string[];
     } else if (!Array.isArray(cardItem.other_rarities)) {
-      // If it's not an array, convert it to an array
       cardItem.other_rarities = [String(cardItem.other_rarities)];
     }
-    
-    // Filter out any null/undefined/empty values and ensure all values are strings
     cardItem.other_rarities = cardItem.other_rarities
       .filter(Boolean)
       .map(value => String(value).trim())
@@ -55,134 +84,61 @@ function parseJsonFields(item: ItemWithJsonFields) {
   return item;
 }
 
-export async function getCards(): Promise<CardItem[]> {
-  try {
-    const { data, error } = await supabase
-      .from('cards')
-      .select('*');
-
-    if (error) {
-      console.error('Error fetching cards:', error);
-      return [];
-    }
-
-    return data ? data.map(parseJsonFields) as CardItem[] : [];
-  } catch (error) {
-    console.error('Error in getCards:', error);
-    return [];
-  }
+function asCard(row: object): CardItem {
+  return parseJsonFields({ ...row, type: 'card' } as CardItem) as CardItem;
 }
 
-export async function getSealedProducts(): Promise<SealedProduct[]> {
-  try {
-    // Try the correct table name first
-    const { data, error } = await supabase
-      .from('sealed')
-      .select('*');
-
-    if (error) {
-      console.error('Error fetching sealed products:', error);
-      // If 'sealed' table doesn't exist, try alternative names
-      const { data: altData, error: altError } = await supabase
-        .from('sealed_products')
-        .select('*');
-      
-      if (altError) {
-        console.error('Error fetching from sealed_products:', altError);
-        return [];
-      }
-      
-      return altData ? altData.map(parseJsonFields) as SealedProduct[] : [];
-    }
-
-    return data ? data.map(parseJsonFields) as SealedProduct[] : [];
-  } catch (error) {
-    console.error('Error in getSealedProducts:', error);
-    return [];
-  }
-}
-
-// Fallback data when database is not available
-function getFallbackData(): (CardItem | SealedProduct)[] {
-  console.warn('Using fallback data - database tables may not exist');
-  
-  const fallbackCards: CardItem[] = [
-    {
-      id: 1,
-      card_id: 'fallback-001',
-      card: 'Fallback Card',
-      series: 'Base Set',
-      set: 'Base',
-      energy_type: 'Colorless',
-      rarity: 'Common',
-      other_rarities: [],
-      psa_grade: 'Ungraded',
-      price: 0,
-      imageUrl: null,
-      additionalImages: [],
-      uploadDate: new Date().toISOString(),
-      description: 'Fallback card data',
-      type: 'card',
-      is_available: false,
-      weight: 0
-    }
-  ];
-  
-  const fallbackSealed: SealedProduct[] = [
-    {
-      id: 2,
-      product_id: 'fallback-sealed-001',
-      product_name: 'Fallback Booster Pack',
-      product_type: 'Booster Pack',
-      sealed_series: 'Base Set',
-      sealed_set: 'Base',
-      uploadDate: new Date().toISOString(),
-      price: 0,
-      imageUrl: null,
-      additionalImages: [],
-      description: 'Fallback sealed product data',
-      packs: 1,
-      type: 'sealed',
-      is_available: false,
-      weight: 0
-    }
-  ];
-  
-  return [...fallbackCards, ...fallbackSealed];
+function asSealed(row: object): SealedProduct {
+  return parseJsonFields({ ...row, type: 'sealed' } as SealedProduct) as SealedProduct;
 }
 
 export async function getAllItems(): Promise<(CardItem | SealedProduct)[]> {
   try {
-    const [cards, sealedProducts] = await Promise.all([
-      getCards().catch(error => {
-        console.error('Error fetching cards:', error);
-        return [];
-      }),
-      getSealedProducts().catch(error => {
-        console.error('Error fetching sealed products:', error);
-        return [];
-      })
+    const supabase = getSupabase();
+    if (!supabase) return [];
+
+    const [cardsRes, sealedRes] = await Promise.all([
+      supabase
+        .from(CARDS_TABLE)
+        .select(CARD_COLUMNS)
+        .order('id', { ascending: false }),
+      supabase
+        .from(SEALED_TABLE)
+        .select(SEALED_COLUMNS)
+        .order('id', { ascending: false }),
     ]);
 
-    // If both database calls fail, return fallback data
-    if (cards.length === 0 && sealedProducts.length === 0) {
-      console.warn('Both database calls failed, using fallback data');
-      return getFallbackData();
-    }
+    if (cardsRes.error) console.error('Error fetching cards:', cardsRes.error);
+    if (sealedRes.error) console.error('Error fetching sealed products:', sealedRes.error);
 
-    // Filter out any items that are null or have missing essential data
-    const allItems = [...cards, ...sealedProducts].filter(item => 
-      item !== null && 
-      item.id && 
-      item.type &&
-      (item.type === 'card' ? (item as CardItem).card : (item as SealedProduct).product_name)
+    const cards = (cardsRes.data ?? []).map((row) => asCard(row));
+    const sealed = (sealedRes.data ?? []).map((row) => asSealed(row));
+
+    // Both arrays are sorted desc by id from the server. Merge them in O(n+m)
+    // while preserving "newest id first" without an additional Array.sort pass.
+    const merged: (CardItem | SealedProduct)[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < cards.length && j < sealed.length) {
+      if (Number(cards[i].id) >= Number(sealed[j].id)) {
+        merged.push(cards[i++]);
+      } else {
+        merged.push(sealed[j++]);
+      }
+    }
+    while (i < cards.length) merged.push(cards[i++]);
+    while (j < sealed.length) merged.push(sealed[j++]);
+
+    return merged.filter(
+      (item) =>
+        item?.id &&
+        item.type &&
+        (item.type === 'card'
+          ? (item as CardItem).card
+          : (item as SealedProduct).product_name)
     );
-    
-    // Sort by ID in descending order (newest first) for Recently Added
-    return allItems.sort((a, b) => b.id - a.id);
   } catch (error) {
     console.error('Error in getAllItems:', error);
-    // Return fallback data instead of empty array to prevent UI from breaking
-    return getFallbackData();
+    return [];
   }
-} 
+}

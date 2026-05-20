@@ -54,7 +54,7 @@ export default function About() {
         
         <div className="mt-12">
           <a 
-            href="/Ponchos" 
+            href="/PokemonStore" 
             className="inline-block bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold py-4 px-8 rounded-full text-lg transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
           >
             Start Your Pokemon Journey →

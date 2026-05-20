@@ -11,7 +11,7 @@ function SuccessContent() {
 
   useEffect(() => {
     if (!sessionId) {
-      router.push('/Ponchos');
+      router.push('/PokemonStore');
     }
   }, [sessionId, router]);
 
@@ -28,7 +28,7 @@ function SuccessContent() {
             Order Reference: {sessionId}
           </p>
           <button
-            onClick={() => router.push('/Ponchos')}
+            onClick={() => router.push('/PokemonStore')}
             className="w-full sm:w-auto bg-purple-700 text-white px-6 py-2 rounded-md hover:bg-purple-800 transition-colors"
           >
             Return to Shop

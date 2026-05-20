@@ -1,30 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
-import nodemailer from 'nodemailer';
-
-// Create transporter with more robust configuration
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.PONCHOS_EMAIL_USER,
-    pass: process.env.PONCHOS_EMAIL_PASSWORD,
-  },
-  tls: {
-    rejectUnauthorized: false
-  }
-});
-
-// Verify transporter configuration
-transporter.verify(function(error) {
-  if (error) {
-    console.error('SMTP Configuration Error:', error);
-  } else {
-    console.log('SMTP Server is ready to send messages');
-  }
-});
+import { escapeHtml, isValidEmail, sendSellerEmail } from '@/lib/email';
 
 interface SellRequest {
   email: string;
@@ -38,9 +15,9 @@ export async function POST(request: Request) {
   try {
     const { email, description } = await request.json();
 
-    if (!email || !description) {
+    if (!email || !description || !isValidEmail(String(email))) {
       return NextResponse.json(
-        { error: 'Email and description are required' },
+        { error: 'Valid email and description are required' },
         { status: 400 }
       );
     }
@@ -89,21 +66,18 @@ export async function POST(request: Request) {
     await fs.writeFile(filePath, JSON.stringify(sellRequests, null, 2));
 
     // Send email notification
-    const mailOptions = {
-      from: process.env.PONCHOS_EMAIL_USER,
-      to: process.env.PONCHOS_SELLER_EMAIL,
+    await sendSellerEmail({
       subject: `New Sell Request - ${newRequest.id}`,
+      replyTo: email,
       html: `
         <h2>New Sell Request</h2>
-        <p><strong>Request ID:</strong> ${newRequest.id}</p>
-        <p><strong>Customer Email:</strong> ${email}</p>
+        <p><strong>Request ID:</strong> ${escapeHtml(newRequest.id)}</p>
+        <p><strong>Customer Email:</strong> ${escapeHtml(email)}</p>
         <p><strong>Description:</strong></p>
-        <p>${description}</p>
+        <p>${escapeHtml(description).replace(/\n/g, '<br />')}</p>
         <p><strong>Timestamp:</strong> ${new Date(newRequest.timestamp).toLocaleString()}</p>
       `
-    };
-
-    await transporter.sendMail(mailOptions);
+    });
 
     return NextResponse.json({
       message: 'Sell request submitted successfully',
