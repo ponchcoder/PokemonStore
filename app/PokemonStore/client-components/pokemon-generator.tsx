@@ -62,7 +62,7 @@ export function PokemonGenerator() {
         <div className="fixed inset-0 bg-stone-200 animate-flash z-50"></div>
       )}
 
-      <div className="flex h-[310px] flex-col items-center">
+      <div className="flex min-h-[360px] flex-col items-center">
         <h2 className="mb-8 h-8 text-center text-2xl font-bold text-white">
           {selectedPokemon ? 'Your Shopping Buddy is...' : 'Choose Your Shopping Buddy'}
         </h2>

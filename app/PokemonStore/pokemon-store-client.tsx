@@ -51,7 +51,7 @@ export default function PokemonStoreClient({ initialItems }: PokemonStoreClientP
       <Header />
       <NavigationMenu />
 
-      <div className="relative z-20 mb-4 flex justify-center">
+      <div className="relative z-20 mb-8 flex justify-center sm:mb-4">
         <PokemonGenerator />
       </div>
 
