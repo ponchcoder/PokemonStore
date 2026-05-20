@@ -28,6 +28,7 @@ export function CartContents({ isOpen, onOpenChange }: CartContentsProps) {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState('');
 
   const MINIMUM_PURCHASE = 5;
   const shippingCost = calculateShipping();
@@ -116,6 +117,7 @@ export function CartContents({ isOpen, onOpenChange }: CartContentsProps) {
 
     try {
       setIsLoading(true);
+      setCheckoutError('');
       const response = await fetch('/api/create-checkout-session', {
         method: 'POST',
         headers: {
@@ -129,10 +131,10 @@ export function CartContents({ isOpen, onOpenChange }: CartContentsProps) {
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
       
-      if (data.error) {
-        throw new Error(data.error);
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || 'Failed to start checkout. Please try again.');
       }
 
       if (data.url) {
@@ -141,7 +143,9 @@ export function CartContents({ isOpen, onOpenChange }: CartContentsProps) {
         throw new Error('Failed to create checkout session');
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to start checkout. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to start checkout. Please try again.';
+      setCheckoutError(message);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -191,6 +195,11 @@ export function CartContents({ isOpen, onOpenChange }: CartContentsProps) {
                 {totalAmount < MINIMUM_PURCHASE && (
                   <p className="text-red-500 text-sm mb-4">
                     Minimum purchase amount of ${MINIMUM_PURCHASE} is required
+                  </p>
+                )}
+                {checkoutError && (
+                  <p className="mb-4 rounded-md border border-red-400/40 bg-red-500/15 p-2 text-sm text-red-100">
+                    {checkoutError}
                   </p>
                 )}
                 <div className="flex flex-col gap-2">
