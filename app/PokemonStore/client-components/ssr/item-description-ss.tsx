@@ -13,6 +13,7 @@ import {
   Tag,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { buildProductImageGallery } from '@/lib/pokemon-store-images';
 import { useCart } from '../CartContext';
 import type { CardItem, SealedProduct } from './items-data';
 
@@ -48,14 +49,9 @@ export function ItemDescriptionContent({ item }: ItemDescriptionContentProps) {
   const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
   const { addItem, isInCart } = useCart();
 
-  // lib/data.ts already normalises additionalImages to a clean string array;
-  // we only need a defensive filter for null entries that may slip through.
-  const additionalImages = useMemo(
-    () =>
-      (Array.isArray(item.additionalImages) ? item.additionalImages : []).filter(
-        (img): img is string => typeof img === 'string' && img.length > 0,
-      ),
-    [item.additionalImages],
+  const galleryImages = useMemo(
+    () => buildProductImageGallery(item.imageUrl, item.additionalImages),
+    [item.imageUrl, item.additionalImages],
   );
 
   const isCard = item.type === 'card';
@@ -76,20 +72,20 @@ export function ItemDescriptionContent({ item }: ItemDescriptionContentProps) {
   );
 
   const nextImage = useCallback(() => {
-    if (additionalImages.length > 0) {
+    if (galleryImages.length > 0) {
       goToImage(
-        currentImageIndex === additionalImages.length - 1 ? 0 : currentImageIndex + 1,
+        currentImageIndex === galleryImages.length - 1 ? 0 : currentImageIndex + 1,
       );
     }
-  }, [additionalImages.length, currentImageIndex, goToImage]);
+  }, [galleryImages.length, currentImageIndex, goToImage]);
 
   const prevImage = useCallback(() => {
-    if (additionalImages.length > 0) {
+    if (galleryImages.length > 0) {
       goToImage(
-        currentImageIndex === 0 ? additionalImages.length - 1 : currentImageIndex - 1,
+        currentImageIndex === 0 ? galleryImages.length - 1 : currentImageIndex - 1,
       );
     }
-  }, [additionalImages.length, currentImageIndex, goToImage]);
+  }, [galleryImages.length, currentImageIndex, goToImage]);
 
   const handleImageLoad = useCallback((index: number) => {
     setLoadedImages((prev) => new Set(prev).add(index));
@@ -100,11 +96,11 @@ export function ItemDescriptionContent({ item }: ItemDescriptionContentProps) {
     () => (
       <div className="group relative aspect-[3/4] w-full overflow-hidden rounded-2xl bg-black/40 ring-1 ring-white/[0.06]">
         {isLoading && <div className="absolute inset-0 z-10 animate-pulse bg-zinc-900/80" />}
-        {additionalImages.length > 0 && additionalImages[currentImageIndex] ? (
+        {galleryImages.length > 0 && galleryImages[currentImageIndex] ? (
           <>
             <Image
               fill
-              src={additionalImages[currentImageIndex]}
+              src={galleryImages[currentImageIndex]}
               alt={`${displayName} - Image ${currentImageIndex + 1}`}
               className={`relative z-20 object-contain p-3 transition-opacity duration-300 ${
                 loadedImages.has(currentImageIndex) ? 'opacity-100' : 'opacity-0'
@@ -115,7 +111,7 @@ export function ItemDescriptionContent({ item }: ItemDescriptionContentProps) {
               quality={85}
               sizes="(max-width: 768px) 100vw, 400px"
             />
-            {additionalImages.length > 1 && (
+            {galleryImages.length > 1 && (
               <>
                 <button
                   type="button"
@@ -158,7 +154,7 @@ export function ItemDescriptionContent({ item }: ItemDescriptionContentProps) {
       </div>
     ),
     [
-      additionalImages,
+      galleryImages,
       currentImageIndex,
       item,
       isLoading,
@@ -172,9 +168,9 @@ export function ItemDescriptionContent({ item }: ItemDescriptionContentProps) {
 
   const Thumbnails = useMemo(
     () =>
-      additionalImages.length > 1 && (
+      galleryImages.length > 1 && (
         <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {additionalImages.map((image, index) => (
+          {galleryImages.map((image, index) => (
             <button
               key={index}
               type="button"
@@ -202,7 +198,7 @@ export function ItemDescriptionContent({ item }: ItemDescriptionContentProps) {
           ))}
         </div>
       ),
-    [additionalImages, currentImageIndex, loadedImages, handleImageLoad, goToImage],
+    [galleryImages, currentImageIndex, loadedImages, handleImageLoad, goToImage],
   );
 
   const cartDisabled = !item.is_available || isInCart(item.id);
@@ -222,10 +218,10 @@ export function ItemDescriptionContent({ item }: ItemDescriptionContentProps) {
       <div className="relative grid gap-6 px-5 pb-5 pt-16 md:grid-cols-[minmax(0,420px)_minmax(0,1fr)] md:gap-8 md:px-7 md:pb-7 md:pt-16">
         <div className="space-y-3">
           {MainImage}
-          {additionalImages.length > 1 && (
+          {galleryImages.length > 1 && (
             <div className="flex justify-center">
               <span className="rounded-full bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-zinc-300 ring-1 ring-white/10">
-                Image {currentImageIndex + 1} of {additionalImages.length}
+                Image {currentImageIndex + 1} of {galleryImages.length}
               </span>
             </div>
           )}

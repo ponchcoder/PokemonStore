@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, ReactNode, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CheckCircle2, ImageIcon, Sparkles, Package, AlertCircle } from 'lucide-react';
@@ -8,6 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AdminGuard, AdminShell } from '../admin-auth';
+import {
+  parseCommaSeparatedImages,
+  splitImageUrlsForStorage,
+} from '@/lib/pokemon-store-images';
 import { cn } from '@/lib/utils';
 
 type ProductType = 'card' | 'sealed';
@@ -117,11 +121,6 @@ function normalizeCommaList(value: string) {
     .join(',');
 }
 
-function normalizeOptionalCommaList(value: string) {
-  const normalized = normalizeCommaList(value);
-  return normalized || null;
-}
-
 function positiveNumber(value: string, field: string, errors: FormErrors) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) {
@@ -153,16 +152,12 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
 
   const [cardForm, setCardForm] = useState<CardForm>(emptyCardForm);
   const [sealedForm, setSealedForm] = useState<SealedForm>(emptySealedForm);
-  const [cardImageFile, setCardImageFile] = useState<File | null>(null);
-  const [sealedImageFile, setSealedImageFile] = useState<File | null>(null);
+  const [cardImageFiles, setCardImageFiles] = useState<File[]>([]);
+  const [sealedImageFiles, setSealedImageFiles] = useState<File[]>([]);
   const [cardErrors, setCardErrors] = useState<FormErrors>({});
   const [sealedErrors, setSealedErrors] = useState<FormErrors>({});
 
-  const cardFilePreview = useFilePreview(cardImageFile);
-  const sealedFilePreview = useFilePreview(sealedImageFile);
-
-  const uploadImage = async (file: File | null, prefix: ProductType) => {
-    if (!file) return '';
+  const uploadImage = async (file: File, prefix: ProductType) => {
     const path = buildStoragePath(file, prefix);
     const { error } = await supabase.storage.from('pokemon-inventory').upload(path, file, {
       cacheControl: '3600',
@@ -170,6 +165,24 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
     });
     if (error) throw error;
     return supabase.storage.from('pokemon-inventory').getPublicUrl(path).data.publicUrl;
+  };
+
+  const resolveStoredImages = async (
+    files: File[],
+    manualMainUrl: string,
+    manualAdditionalCsv: string,
+    prefix: ProductType,
+  ) => {
+    const fileUrls = await Promise.all(files.map((file) => uploadImage(file, prefix)));
+    const extraFromField = parseCommaSeparatedImages(manualAdditionalCsv);
+    const manualMain = manualMainUrl.trim();
+    const ordered =
+      fileUrls.length > 0
+        ? [...fileUrls, ...extraFromField.filter((url) => !fileUrls.includes(url))]
+        : manualMain
+          ? [manualMain, ...extraFromField.filter((url) => url !== manualMain)]
+          : extraFromField;
+    return splitImageUrlsForStorage(ordered);
   };
 
   const setCardField = <K extends keyof CardForm>(key: K, value: CardForm[K]) =>
@@ -196,7 +209,12 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
     try {
       setSubmitting(true);
       setToast(null);
-      const uploadedImageUrl = await uploadImage(cardImageFile, 'card');
+      const { imageUrl, additionalImages } = await resolveStoredImages(
+        cardImageFiles,
+        cardForm.imageUrl,
+        cardForm.additionalImages,
+        'card',
+      );
       const { error } = await supabase.from('CardItem').insert({
         card_id: cardForm.card_id.trim() || `CARD-${Date.now()}`,
         card: cardForm.card.trim(),
@@ -207,8 +225,8 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
         other_rarities: normalizeCommaList(cardForm.other_rarities),
         psa_grade: cardForm.psa_grade.trim() || 'Ungraded',
         price,
-        imageUrl: uploadedImageUrl || cardForm.imageUrl.trim() || null,
-        additionalImages: normalizeOptionalCommaList(cardForm.additionalImages),
+        imageUrl,
+        additionalImages,
         uploadDate: cardForm.uploadDate || new Date().toISOString(),
         description: cardForm.description.trim(),
         is_available: cardForm.is_available,
@@ -217,7 +235,7 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
       });
       if (error) throw error;
       setCardForm(emptyCardForm);
-      setCardImageFile(null);
+      setCardImageFiles([]);
       setToast({ kind: 'success', text: `“${cardForm.card.trim()}” added to CardItem.` });
     } catch (error) {
       setToast({ kind: 'error', text: error instanceof Error ? error.message : 'Failed to add card' });
@@ -245,7 +263,12 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
     try {
       setSubmitting(true);
       setToast(null);
-      const uploadedImageUrl = await uploadImage(sealedImageFile, 'sealed');
+      const { imageUrl, additionalImages } = await resolveStoredImages(
+        sealedImageFiles,
+        sealedForm.imageUrl,
+        sealedForm.additionalImages,
+        'sealed',
+      );
       const { error } = await supabase.from('SealedProduct').insert({
         product_id: sealedForm.product_id.trim() || `SEALED-${Date.now()}`,
         product_name: sealedForm.product_name.trim(),
@@ -254,8 +277,8 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
         sealed_set: sealedForm.sealed_set.trim(),
         uploadDate: sealedForm.uploadDate || new Date().toISOString(),
         price,
-        imageUrl: uploadedImageUrl || sealedForm.imageUrl.trim() || null,
-        additionalImages: normalizeOptionalCommaList(sealedForm.additionalImages),
+        imageUrl,
+        additionalImages,
         description: sealedForm.description.trim(),
         packs,
         is_available: sealedForm.is_available,
@@ -264,7 +287,7 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
       });
       if (error) throw error;
       setSealedForm(emptySealedForm);
-      setSealedImageFile(null);
+      setSealedImageFiles([]);
       setToast({ kind: 'success', text: `“${sealedForm.product_name.trim()}” added to SealedProduct.` });
     } catch (error) {
       setToast({ kind: 'error', text: error instanceof Error ? error.message : 'Failed to add sealed product' });
@@ -414,12 +437,10 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
 
           <aside className="space-y-6">
             <ImageUploader
-              file={cardImageFile}
-              previewUrl={cardFilePreview}
-              fallbackUrl={cardForm.imageUrl}
-              onFileChange={setCardImageFile}
-              onUrlChange={(v) => setCardField('imageUrl', v)}
+              files={cardImageFiles}
+              onFilesChange={setCardImageFiles}
               urlValue={cardForm.imageUrl}
+              onUrlChange={(v) => setCardField('imageUrl', v)}
               additionalImages={cardForm.additionalImages}
               onAdditionalChange={(v) => setCardField('additionalImages', v)}
             />
@@ -545,12 +566,10 @@ function AddInventory({ supabase, signOut }: { supabase: SupabaseClient; signOut
 
           <aside className="space-y-6">
             <ImageUploader
-              file={sealedImageFile}
-              previewUrl={sealedFilePreview}
-              fallbackUrl={sealedForm.imageUrl}
-              onFileChange={setSealedImageFile}
-              onUrlChange={(v) => setSealedField('imageUrl', v)}
+              files={sealedImageFiles}
+              onFilesChange={setSealedImageFiles}
               urlValue={sealedForm.imageUrl}
+              onUrlChange={(v) => setSealedField('imageUrl', v)}
               additionalImages={sealedForm.additionalImages}
               onAdditionalChange={(v) => setSealedField('additionalImages', v)}
             />
@@ -750,67 +769,85 @@ function Toggle({
 }
 
 function ImageUploader({
-  file,
-  previewUrl,
-  fallbackUrl,
+  files,
+  onFilesChange,
   urlValue,
-  onFileChange,
   onUrlChange,
   additionalImages,
   onAdditionalChange,
 }: {
-  file: File | null;
-  previewUrl: string | null;
-  fallbackUrl: string;
+  files: File[];
+  onFilesChange: (files: File[]) => void;
   urlValue: string;
-  onFileChange: (file: File | null) => void;
   onUrlChange: (value: string) => void;
   additionalImages: string;
   onAdditionalChange: (value: string) => void;
 }) {
-  const displayUrl = previewUrl || (fallbackUrl.trim() ? fallbackUrl.trim() : '');
+  const previews = useMultiFilePreviews(files);
+
+  const addFiles = (incoming: FileList | null) => {
+    if (!incoming?.length) return;
+    onFilesChange([...files, ...Array.from(incoming)]);
+  };
+
+  const removeFile = (index: number) => {
+    onFilesChange(files.filter((_, i) => i !== index));
+  };
 
   return (
     <section className="rounded-2xl border border-white/10 bg-zinc-900/70 p-5 shadow-xl shadow-black/40">
       <header className="mb-4">
-        <h2 className="text-base font-semibold text-white">Image</h2>
-        <p className="mt-0.5 text-sm text-zinc-400">Upload a file or paste a public URL.</p>
+        <h2 className="text-base font-semibold text-white">Photos</h2>
+        <p className="mt-0.5 text-sm text-zinc-400">
+          Upload multiple images. The first photo is the main image on the shop; the rest appear in View Details.
+        </p>
       </header>
 
-      <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-dashed border-white/10 bg-zinc-950/60">
-        {displayUrl ? (
-          <Image
-            src={displayUrl}
-            alt={file?.name ?? 'Image preview'}
-            fill
-            sizes="360px"
-            className="object-contain"
-            unoptimized
-          />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-zinc-500">
-            <ImageIcon className="size-10" />
-            <span className="text-xs">No image selected</span>
-          </div>
-        )}
-      </div>
+      {previews.length > 0 ? (
+        <div className="mb-4 grid grid-cols-2 gap-2">
+          {previews.map((preview, index) => (
+            <div
+              key={`${preview.url}-${index}`}
+              className="relative aspect-square overflow-hidden rounded-lg border border-white/10 bg-zinc-950/60"
+            >
+              <Image src={preview.url} alt={preview.name} fill sizes="160px" className="object-contain" unoptimized />
+              <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                {index === 0 ? 'Main' : `#${index + 1}`}
+              </span>
+              <button
+                type="button"
+                onClick={() => removeFile(index)}
+                className="absolute right-1.5 top-1.5 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-red-500"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mb-4 flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-white/10 bg-zinc-950/60 text-zinc-500">
+          <ImageIcon className="size-10" />
+          <span className="text-xs">No photos selected</span>
+        </div>
+      )}
 
-      <div className="mt-4 space-y-3">
+      <div className="space-y-3">
         <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-white/10 bg-zinc-950/60 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900">
           <input
             type="file"
             accept="image/*"
+            multiple
             className="hidden"
-            onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
+            onChange={(event) => addFiles(event.target.files)}
           />
-          {file ? `Change file (${file.name})` : 'Upload image file'}
+          {files.length > 0 ? 'Add more photos' : 'Upload photos'}
         </label>
 
-        <Field label="Or image URL">
+        <Field label="Or main image URL" hint="Used if you upload no files">
           <FieldInput value={urlValue} onChange={onUrlChange} placeholder="https://…" />
         </Field>
 
-        <Field label="Additional Images" hint="Comma-separated URLs">
+        <Field label="Extra image URLs" hint="Comma-separated; merged with uploaded photos">
           <FieldInput
             value={additionalImages}
             onChange={onAdditionalChange}
@@ -822,10 +859,20 @@ function ImageUploader({
   );
 }
 
-function useFilePreview(file: File | null) {
-  return useMemo(() => {
-    if (!file) return null;
-    if (typeof URL === 'undefined') return null;
-    return URL.createObjectURL(file);
-  }, [file]);
+function useMultiFilePreviews(files: File[]) {
+  const previews = useMemo(() => {
+    if (typeof URL === 'undefined') return [];
+    return files.map((file) => ({
+      name: file.name,
+      url: URL.createObjectURL(file),
+    }));
+  }, [files]);
+
+  useEffect(() => {
+    return () => {
+      previews.forEach((preview) => URL.revokeObjectURL(preview.url));
+    };
+  }, [previews]);
+
+  return previews;
 }
